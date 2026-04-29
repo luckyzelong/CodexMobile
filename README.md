@@ -1,190 +1,205 @@
 # CodexMobile
 
-CodexMobile is a lightweight iPhone-first PWA for using a local Codex setup from your phone. It runs a small bridge service on your computer, reads local Codex projects and sessions, and exposes a mobile chat UI over a private network such as Tailscale.
+CodexMobile 是一个面向 iPhone 的 Codex PWA 客户端。它在电脑上启动一个轻量本地桥接服务，通过 Tailscale、局域网或其它私有网络，让手机可以访问并使用这台电脑上的 Codex 项目、会话和模型能力。
 
-The project is designed for personal/private use. It is not a public SaaS, multi-user control panel, or remote desktop replacement.
+这个项目适合个人使用：你可以在 iPhone 主屏像 App 一样打开它，切换 Codex 项目、查看线程、发送文字或语音消息、上传文件，并在手机上接收 Codex 的实时回复和执行状态。
 
-## Features
+> 本项目不是公网 SaaS、多人控制台或远程桌面工具。建议只在可信私有网络中使用。
 
-- iPhone-friendly PWA that can be added to the Home Screen
-- Local bridge server with HTTP, HTTPS, REST APIs, and WebSocket streaming
-- Reads local Codex config, projects, models, and session JSONL files
-- Starts new Codex conversations and continues existing sessions
-- Project drawer with expandable sessions, rename, and delete
-- Real-time Codex status lines for thinking, tool calls, commands, file changes, and errors
-- File and image upload as local paths passed to Codex
-- Optional local image generation support through an OpenAI-compatible provider
-- Optional local voice input through a SenseVoice/FunASR Docker service
-- CLIProxyAPI Codex quota display, when CLIProxyAPI management credentials are configured
-- Device pairing with local tokens, intended for private-network access
+## 界面演示
 
-## Architecture
+| 项目抽屉 | 对话与模型选择 |
+| --- | --- |
+| <img src="docs/images/ios-drawer.png" width="280" alt="CodexMobile 项目抽屉" /> | <img src="docs/images/ios-chat.png" width="280" alt="CodexMobile 对话界面" /> |
+
+## 功能特性
+
+- iPhone 优先的 PWA 界面，可添加到 iOS 主屏
+- 读取本机 Codex 项目和会话，支持项目切换、线程展开、重命名和删除
+- 新建对话、续聊已有线程，并通过 WebSocket 显示实时状态
+- 支持权限模式、模型选择和推理强度选择
+- 支持图片/文件上传，文件保存在本机并将路径交给 Codex 使用
+- 支持语音输入：前端录音，后端转写后自动发送给 Codex
+- 支持本地 SenseVoice/FunASR 中文语音识别服务
+- 支持生成图片并在移动端展示
+- 支持 CLIProxyAPI Codex 额度查询
+- 支持浅色/深色主题
+- 支持一次性配对码和本机设备 token，适合私有网络访问
+
+## 架构
 
 ```text
 iPhone PWA
   |
-  | HTTPS over Tailscale/private LAN
+  | HTTPS / WebSocket，建议走 Tailscale 或局域网
   v
-CodexMobile server (Node.js)
-  |-- reads ~/.codex config, sessions, models
-  |-- calls @openai/codex-sdk for chat turns
-  |-- calls CLIProxyAPI/OpenAI-compatible APIs for images and quotas
-  |-- optionally calls local SenseVoice ASR on :8000
+CodexMobile Node.js 服务
+  |-- 读取 ~/.codex/config.toml
+  |-- 读取 ~/.codex/sessions
+  |-- 调用 @openai/codex-sdk 发送和续聊
+  |-- 调用 OpenAI 兼容接口生成图片
+  |-- 调用本地 SenseVoice ASR 或 OpenAI 兼容转写接口
+  |-- 可选调用 CLIProxyAPI 管理接口查询 Codex 额度
 ```
 
-## Requirements
+## 环境要求
 
-- Windows, macOS, or Linux computer with Node.js 20+
-- A working local Codex configuration in `~/.codex`
-- Private network access from your phone, for example Tailscale
-- Optional: Docker Desktop for local SenseVoice voice transcription
-- Optional: CLIProxyAPI if you want OpenAI-compatible routing, image generation, or quota display
+- Node.js 20+
+- npm
+- 已配置好的本机 Codex 环境，默认读取 `~/.codex`
+- 手机和电脑在同一私有网络中，例如 Tailscale 或局域网
+- 可选：Docker Desktop，用于本地 SenseVoice 语音识别
+- 可选：CLIProxyAPI，用于 OpenAI 兼容路由、图片生成或额度查询
 
-## Quick Start
+## 快速开始
 
 ```powershell
+git clone https://github.com/2449796202qq-arch/CodexMobile.git
+cd CodexMobile
 npm install
 npm run build
 npm start
 ```
 
-Open the local UI:
+启动后在电脑浏览器打开：
 
 ```text
 http://127.0.0.1:3321
 ```
 
-For phone access, connect both devices to Tailscale or the same private network, then open:
+手机访问时，建议先把电脑和 iPhone 接入 Tailscale 或同一个局域网，然后打开：
 
 ```text
-http://<computer-private-ip>:3321
+http://<电脑的私网 IP>:3321
 ```
 
-The server prints a six-digit pairing code on startup. Enter it once on the phone. CodexMobile stores a device token in the browser/PWA.
+第一次进入需要输入服务启动时打印的 6 位配对码。配对成功后，浏览器会保存设备 token，后续不需要每次重新输入。
 
-## HTTPS for iOS Microphone
+## HTTPS 与 iOS 语音权限
 
-iOS requires HTTPS for microphone access in browser/PWA contexts. CodexMobile supports HTTPS on port `3443` if you provide a PFX certificate:
+iOS Safari / PWA 通常要求 HTTPS 才能稳定使用麦克风。你可以使用自己的证书、反向代理，或 Tailscale Serve 暴露 HTTPS 地址。
+
+示例：
 
 ```powershell
-$env:HTTPS_PFX_PATH="$PWD\.codexmobile\tls\server.pfx"
-$env:HTTPS_PFX_PASSPHRASE="change-me"
-$env:HTTPS_ROOT_CA_PATH="$PWD\.codexmobile\tls\codexmobile-root-ca.cer"
-npm start
-```
-
-Then open:
-
-```text
-https://<your-device>.<your-tailnet>.ts.net:3443/
-```
-
-If you use a self-signed CA, install and trust that CA on the iPhone.
-
-## Configuration
-
-Copy `.env.example` and set only what you need:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Then start with:
-
-```powershell
+$env:CODEXMOBILE_PUBLIC_URL="https://<your-device>.<your-tailnet>.ts.net:3443/"
 npm run start:env
 ```
 
-You can also set environment variables in PowerShell, systemd, Task Scheduler, Docker, or any other service manager and keep using `npm start`.
+如果你使用自签名证书，可以通过环境变量指定：
 
-Common variables:
+```powershell
+$env:HTTPS_PFX_PATH="C:\path\to\server.pfx"
+$env:HTTPS_PFX_PASSPHRASE="change-me"
+$env:HTTPS_ROOT_CA_PATH="C:\path\to\root-ca.cer"
+npm run start:env
+```
 
-- `PORT`: HTTP port, default `3321`
-- `HTTPS_PORT`: HTTPS port, default `3443`
-- `CODEXMOBILE_PUBLIC_URL`: URL printed by startup scripts
-- `CODEXMOBILE_PAIRING_CODE`: optional fixed six-digit pairing code
-- `CODEX_HOME`: Codex home directory, default `~/.codex`
-- `CODEXMOBILE_HOME`: CodexMobile auth state directory, default `.codexmobile/state`
-- `CLIPROXYAPI_CONFIG`: CLIProxyAPI config path
-- `CLIPROXYAPI_API_KEY` / `CLI_PROXY_API_KEY`: optional OpenAI-compatible API keys
-- `CODEXMOBILE_CLIPROXY_MANAGEMENT_URL`: CLIProxyAPI management URL
-- `CODEXMOBILE_CLIPROXY_MANAGEMENT_KEY`: CLIProxyAPI management key
+## 配置
 
-Do not commit `.env`, `.codexmobile`, certificates, generated files, uploads, or local auth data.
+复制示例配置：
 
-## Local Voice Input
+```powershell
+Copy-Item .env.example .env
+npm run start:env
+```
 
-CodexMobile can use a local OpenAI-compatible SenseVoice service for Chinese-friendly transcription.
+常用配置项：
 
-Start Docker Desktop, then run:
+- `HOST`：服务监听地址，默认 `0.0.0.0`
+- `PORT`：HTTP 端口，默认 `3321`
+- `HTTPS_PORT`：HTTPS 端口，默认 `3443`
+- `CODEXMOBILE_PUBLIC_URL`：手机访问用的公开私网地址
+- `CODEXMOBILE_PAIRING_CODE`：可选固定 6 位配对码；不设置则启动时随机生成
+- `CODEX_HOME`：Codex 配置目录，默认 `~/.codex`
+- `CODEXMOBILE_HOME`：CodexMobile 本地状态目录，默认 `.codexmobile/state`
+- `CLIPROXYAPI_CONFIG`：CLIProxyAPI 配置文件路径
+- `CLIPROXYAPI_API_KEY` / `CLI_PROXY_API_KEY`：OpenAI 兼容接口密钥
+- `CODEXMOBILE_CLIPROXY_MANAGEMENT_URL`：CLIProxyAPI 管理接口地址
+- `CODEXMOBILE_CLIPROXY_MANAGEMENT_KEY`：CLIProxyAPI 管理密钥
+
+不要提交 `.env`、`.codexmobile`、证书、日志、上传文件、生成图片或本地认证数据。
+
+## 本地中文语音识别
+
+CodexMobile 支持本地 SenseVoice/FunASR 语音识别。第一版默认使用 `iic/SenseVoiceSmall`，更适合中文、粤语、口音和短指令场景。
+
+启动本地 ASR 服务：
 
 ```powershell
 npm run asr:start
 ```
 
-Default endpoint:
+默认接口：
 
 ```text
 http://127.0.0.1:8000/v1/audio/transcriptions
 ```
 
-Default model:
+语音数据不会保存为聊天附件。服务端只在内存中处理上传音频；如果模型推理必须落临时文件，会在请求结束后立即删除。
 
-```text
-iic/SenseVoiceSmall
-```
-
-The phone uploads the recording to CodexMobile, CodexMobile forwards it to the local ASR service, and audio is not saved as an upload or chat attachment. If the ASR implementation needs a temporary file internally, it should delete it after the request.
-
-Useful variables:
+相关配置：
 
 - `CODEXMOBILE_LOCAL_TRANSCRIBE_BASE_URL`
 - `CODEXMOBILE_TRANSCRIBE_MODEL`
 - `CODEXMOBILE_ASR_DEVICE`
-- `CODEXMOBILE_ASR_REBUILD=1`
-- `CODEXMOBILE_ASR_RECREATE=1`
+- `CODEXMOBILE_ASR_PORT`
 
-## CLIProxyAPI Quotas
+## 图片生成
 
-If CLIProxyAPI management is available, CodexMobile can query Codex quota data through CLIProxyAPI management APIs.
+图片生成使用 OpenAI 兼容接口。你可以通过 CLIProxyAPI 或其它兼容服务提供图片模型。
 
-Set:
+相关配置：
 
-```powershell
-$env:CODEXMOBILE_CLIPROXY_MANAGEMENT_URL="http://127.0.0.1:8317"
-$env:CODEXMOBILE_CLIPROXY_MANAGEMENT_KEY="<your-management-key>"
-```
+- `CODEXMOBILE_IMAGE_BASE_URL`
+- `CODEXMOBILE_IMAGE_API_KEY`
+- `CODEXMOBILE_IMAGE_MODEL`
+- `CODEXMOBILE_IMAGE_TIMEOUT_MS`
 
-The UI displays remaining quota percentages, matching CLIProxyAPI management page behavior.
+生成的图片默认保存到 `.codexmobile/generated`，不会进入 Git。
 
-## Scripts
+## CLIProxyAPI 额度查询
 
-- `npm run build`: build the PWA into `client/dist`
-- `npm start`: start the API, WebSocket endpoint, and built PWA
-- `npm run start:bg`: start the server in the background and write logs under `.codexmobile`
-- `npm run asr:start`: build/start the local SenseVoice ASR Docker container
-- `npm run smoke`: check the local `/api/status` endpoint
+如果本机配置了 CLIProxyAPI 管理接口，CodexMobile 可以在 iPhone 抽屉中查询 Codex 额度。
 
-## Private Network Deployment
+相关配置：
 
-Recommended deployment for personal use:
+- `CODEXMOBILE_CLIPROXY_MANAGEMENT_URL`
+- `CODEXMOBILE_CLIPROXY_MANAGEMENT_KEY`
+- `CLIPROXYAPI_CONFIG`
 
-1. Install Tailscale on the computer and iPhone.
-2. Start CodexMobile on the computer.
-3. Use HTTP for text-only testing, or HTTPS for microphone features.
-4. Pair the phone once with the printed code.
-5. Add the PWA to the iPhone Home Screen.
+返回给前端的数据会脱敏，不会返回 access token 或完整密钥。
 
-Avoid exposing CodexMobile directly to the public internet. The first version assumes a single trusted user on a private network.
+## 常用脚本
 
-## Security Notes
+- `npm run build`：构建 PWA 到 `client/dist`
+- `npm start`：启动 API、WebSocket 和构建后的 PWA
+- `npm run start:env`：读取 `.env` 后启动
+- `npm run start:bg`：后台启动服务，日志写入 `.codexmobile`
+- `npm run asr:start`：构建并启动本地 SenseVoice ASR Docker 容器
+- `npm run smoke`：检查本机 `/api/status`
 
-- Pairing tokens are stored locally under `.codexmobile/state`.
-- Uploads and generated images are stored under `.codexmobile`.
-- HTTPS certificates are local files and should not be committed.
-- CLIProxyAPI/OpenAI keys should come from environment variables or local config files only.
-- The project intentionally excludes `.codexmobile`, `node_modules`, build output, env files, logs, and certificates from Git.
+## 私有网络部署建议
+
+推荐方式：
+
+1. 电脑和 iPhone 都安装 Tailscale。
+2. 电脑启动 CodexMobile。
+3. 使用 Tailscale IP 或 Tailscale Serve HTTPS 地址访问。
+4. 第一次访问时输入配对码。
+5. 在 iPhone Safari 中选择“添加到主屏幕”。
+
+不建议直接把 CodexMobile 暴露到公网。
+
+## 安全说明
+
+- 配对 token 存储在 `.codexmobile/state`
+- 上传文件和生成图片存储在 `.codexmobile`
+- `.env.example` 只包含占位配置，不包含真实密钥
+- `.gitignore` 已排除 `.env`、`.codexmobile`、证书、日志、构建产物和依赖目录
+- CLIProxyAPI / OpenAI key 应通过环境变量或本地配置文件提供
+- 本项目默认按单用户、私有网络场景设计
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+MIT
