@@ -177,6 +177,35 @@ function emitStatus(emit, { sessionId, turnId, kind, status = 'running', label, 
   });
 }
 
+function isSpawnPermissionError(error) {
+  return error?.code === 'EPERM' && String(error?.syscall || '').startsWith('spawn');
+}
+
+function userFacingCodexError(error) {
+  const message = String(error?.message || 'Codex task failed');
+  if (process.platform === 'win32' && isSpawnPermissionError(error)) {
+    return [
+      'Codex 执行器启动被 Windows 拒绝（spawn EPERM）。',
+      '通常是后台服务从受限环境启动导致的，请重启正式服务后再试。'
+    ].join(' ');
+  }
+  return message;
+}
+
+function codexErrorDiagnostics(error) {
+  return {
+    message: error?.message || '',
+    code: error?.code || '',
+    errno: error?.errno || '',
+    syscall: error?.syscall || '',
+    path: error?.path || '',
+    spawnargs: Array.isArray(error?.spawnargs) ? error.spawnargs : [],
+    cwd: process.cwd(),
+    execPath: process.execPath,
+    pathLength: String(process.env.Path || process.env.PATH || '').length
+  };
+}
+
 function emitActivity(emit, { sessionId, turnId, messageId, item, kind, status }) {
   const detail = detailFromItem(item);
   emit({
@@ -348,7 +377,7 @@ export async function runCodexTurn({ sessionId, draftSessionId, projectPath, mes
   let thread = null;
 
   try {
-    const codex = new Codex();
+    const codex = new Codex({ env: { ...process.env } });
     const threadOptions = {
       workingDirectory,
       skipGitRepoCheck: true,
@@ -418,22 +447,23 @@ export async function runCodexTurn({ sessionId, draftSessionId, projectPath, mes
       error?.name === 'AbortError' ||
       String(error?.message || '').toLowerCase().includes('aborted') ||
       activeRuns.get(turnId)?.status === 'aborted';
+    const userError = userFacingCodexError(error);
 
     emit({
       type: wasAborted ? 'chat-aborted' : 'chat-error',
       sessionId: currentSessionId,
       turnId,
-      error: wasAborted ? null : error.message
+      error: wasAborted ? null : userError
     });
     if (!wasAborted) {
-      console.error('[codex] Chat error:', error);
+      console.error('[codex] Chat error:', codexErrorDiagnostics(error));
       emitStatus(emit, {
         sessionId: currentSessionId,
         turnId,
         kind: 'turn',
         status: 'failed',
         label: '任务失败',
-        detail: error.message
+        detail: userError
       });
     }
   } finally {

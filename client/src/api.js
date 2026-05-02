@@ -37,9 +37,46 @@ export async function apiFetch(path, options = {}) {
   return data;
 }
 
+export async function apiBlobFetch(path, options = {}) {
+  const token = getToken();
+  const headers = {
+    ...(options.body instanceof FormData ? {} : { 'content-type': 'application/json' }),
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
+    ...(options.headers || {})
+  };
+
+  const response = await fetch(path, {
+    ...options,
+    headers,
+    body:
+      options.body && !(options.body instanceof FormData) && typeof options.body !== 'string'
+        ? JSON.stringify(options.body)
+        : options.body
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    let message = `Request failed: ${response.status}`;
+    try {
+      const data = text ? JSON.parse(text) : {};
+      message = data.error || message;
+    } catch {
+      message = text || message;
+    }
+    throw new Error(message);
+  }
+
+  return response.blob();
+}
+
 export function websocketUrl() {
   const token = encodeURIComponent(getToken());
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${window.location.host}/ws?token=${token}`;
 }
 
+export function realtimeVoiceWebsocketUrl() {
+  const token = encodeURIComponent(getToken());
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws/realtime?token=${token}`;
+}

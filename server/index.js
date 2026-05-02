@@ -32,6 +32,8 @@ import { abortCodexTurn, getActiveRuns, runCodexTurn } from './codex-runner.js';
 import { GENERATED_ROOT, isImageRequest, runImageTurn } from './image-generator.js';
 import { registerMobileSession } from './mobile-session-index.js';
 import { publicVoiceTranscriptionStatus, transcribeAudio } from './voice-transcriber.js';
+import { publicVoiceSpeechStatus, synthesizeSpeech } from './voice-speaker.js';
+import { publicVoiceRealtimeStatus, startVoiceRealtimeProxy } from './realtime-voice.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -576,6 +578,8 @@ function publicStatus(authenticated) {
     models: config.models?.length ? config.models : fallbackModels(config),
     reasoningEffort: DEFAULT_REASONING_EFFORT,
     voiceTranscription: publicVoiceTranscriptionStatus(config),
+    voiceSpeech: publicVoiceSpeechStatus(config),
+    voiceRealtime: publicVoiceRealtimeStatus(config),
     syncedAt: snapshot.syncedAt,
     activeRuns: [...getActiveRuns(), ...getActiveImageRuns()],
     auth: {
@@ -906,6 +910,33 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'POST' && pathname === '/api/voice/speech') {
+    const startedAt = Date.now();
+    try {
+      const body = await readBody(req);
+      const config = getCacheSnapshot().config || {};
+      const result = await synthesizeSpeech(body.text, config);
+      console.log(`[voice] synthesized bytes=${result.data.length} provider=${result.provider} model=${result.model} voice=${result.voice} remote=${remoteAddress(req)}`);
+      res.writeHead(200, {
+        'content-type': result.mimeType,
+        'content-length': result.data.length,
+        'cache-control': 'no-store',
+        'x-codexmobile-duration-ms': String(Date.now() - startedAt)
+      });
+      res.end(result.data);
+    } catch (error) {
+      const statusCode = error.statusCode || 502;
+      const safeMessage = String(error.message || '语音合成失败')
+        .replace(/sk-\[hidden\][A-Za-z0-9*._-]*/g, 'sk-[hidden]')
+        .replace(/sk-[A-Za-z0-9._-]+/g, 'sk-[hidden]');
+      console.warn(`[voice] speech failed status=${statusCode} remote=${remoteAddress(req)} message=${safeMessage}`);
+      sendJson(res, statusCode, {
+        error: safeMessage || '语音合成失败'
+      });
+    }
+    return;
+  }
+
   if (method === 'POST' && pathname === '/api/chat/send') {
     const body = await readBody(req);
     const attachmentCount = Array.isArray(body.attachments) ? body.attachments.length : 0;
@@ -1210,10 +1241,11 @@ async function main() {
 
   const server = http.createServer(requestHandler);
   const wss = new WebSocketServer({ noServer: true });
+  const realtimeWss = new WebSocketServer({ noServer: true });
 
   const handleUpgrade = async (req, socket, head) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || `127.0.0.1:${PORT}`}`);
-    if (url.pathname !== '/ws') {
+    if (url.pathname !== '/ws' && url.pathname !== '/ws/realtime') {
       socket.destroy();
       return;
     }
@@ -1223,6 +1255,13 @@ async function main() {
     if (!ok) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
+      return;
+    }
+
+    if (url.pathname === '/ws/realtime') {
+      realtimeWss.handleUpgrade(req, socket, head, (ws) => {
+        startVoiceRealtimeProxy(ws, { remoteAddress: remoteAddress(req) });
+      });
       return;
     }
 
